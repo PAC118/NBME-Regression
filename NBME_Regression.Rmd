@@ -1,0 +1,784 @@
+---
+title: "Predicting NBME Percentiles"
+author: "Trish Campos"
+date: '`r Sys.Date()`'
+output:
+  rmdformats::readthedown:
+    highlight: kate
+    number_sections: yes
+    code_folding: show
+---
+
+```{r knitr_init, echo=FALSE, cache=FALSE, include=FALSE}
+library(knitr); library(rmdformats)
+
+## Global options
+opts_chunk$set(echo=TRUE, cache=FALSE, prompt=FALSE, tidy=FALSE, 
+               comment=NA, message=FALSE, warning=FALSE)
+opts_knit$set(width=75)
+
+## For this template to work, you'll need to install the `rmdformats` package in your R session, using the command
+# install.packages("rmdformats")
+```
+
+```{r load packages here, include = FALSE}
+library(arm); library(leaps); library(tableone); library(gridExtra); library(car);
+library(pander); library(ROCR); library(readxl); library(miceadds); library(MASS);
+library(rms); library(forcats); library(mice); library(mitools); library(mctest); library(QuantPsyc); library(modelr);
+library(VIM); library(broom); library(searchable); library(lars); library(tidyverse)
+
+source("Love-boost.R")
+```
+
+# Background
+
+
+First year students take two semesters of both Medical Physiology and Translational Physiology before sitting for the physiology board exam in the spring. Predictor variables include exam grades for each block for both fall and spring semesters. Students were only excluded from the data set if they did not sit for the national board exam on the May administration. All scores were downloaded from Blackboard.
+
+The students are required to sit for the [National Board of Medical Examiners Physiology](http://www.nbme.org/students/Subject-Exams/subexams.html) subject test in the spring. The scores consist of the raw number correct for both the physiology and neurophysiology sections of the exam. There is also a combined raw score that accounts for both sections. An “NBME score” is then obtained from the combined raw score. This NBME score is then converted into a percentile. The percentiles are based on the performance of 4,565 students from 26 different institutions. Although the score on the exam does not factor into the final grades, students are required to pass in order to graduate. Passing is set by the department at the third percentile.
+
+The purpose of this study is to predict performance (measured by percentile) on the NBME exam based on final semester grades for both classes and practice test scores.
+ 
+# Research Questions
+
+1. Predict NBME percentile based on Block exam scores.
+
+# The Data{.tabset}
+
+## Data Load
+
+```{r Load Data, include=TRUE, message=FALSE, warning=FALSE}
+# Grades Entering 2011 Class Medical Physiology 
+class2011_481 <- read_excel("Grades_Raw_2.xlsx", sheet = "2011_481")
+class2011_483 <- read_excel("Grades_Raw_2.xlsx", sheet = "2011_483")
+class2011_482 <- read_excel("Grades_Raw_2.xlsx", sheet = "2011_482")
+class2011_484 <- read_excel("Grades_Raw_2.xlsx", sheet = "2011_484")
+list2011 <- c(class2011_483, class2011_484)
+
+# Grades Entering 2012 Class Medical Physiology
+class2012_481 <- read_excel("Grades_Raw_2.xlsx", sheet = "2012_481")
+class2012_483 <- read_excel("Grades_Raw_2.xlsx", sheet = "2012_483")
+class2012_482 <- read_excel("Grades_Raw_2.xlsx", sheet = "2012_482")
+class2012_484 <- read_excel("Grades_Raw_2.xlsx", sheet = "2012_484")
+class2012_NBME <- read_excel("Grades_Raw_2.xlsx", sheet = "2012_NBME")
+
+# Grades Entering 2013 Class Medical Physiology
+class2013_481 <- read_excel("Grades_Raw_2.xlsx", sheet = "2013_481")
+class2013_483 <- read_excel("Grades_Raw_2.xlsx", sheet = "2013_483")
+class2013_482 <- read_excel("Grades_Raw_2.xlsx", sheet = "2013_482")
+class2013_484 <- read_excel("Grades_Raw_2.xlsx", sheet = "2013_484")
+class2013_NBME <- read_excel("Grades_Raw_2.xlsx", sheet = "2013_NBME")
+
+# Grades Entering 2014 Class Medical Physiology
+class2014_NBME <- read_excel("Grades_Raw_2.xlsx", sheet = "2014_NBME")
+class2014_Hob <- read_excel("Grades_Raw_2.xlsx", sheet = "2014_Hob")
+
+# Grades Entering 2015 Class Medical Physiology
+class2015_481 <- read_excel("Grades_Raw_2.xlsx", sheet = "2015_481")
+class2015_483 <- read_excel("Grades_Raw_2.xlsx", sheet = "2015_483")
+class2015_482 <- read_excel("Grades_Raw_2.xlsx", sheet = "2015_482")
+class2015_484 <- read_excel("Grades_Raw_2.xlsx", sheet = "2015_484")
+class2015_NBME <- read_excel("Grades_Raw_2.xlsx", sheet = "2015_NBME")
+class2015_Hob <- read_excel("Grades_Raw_2.xlsx", sheet = "2015_Hob")
+
+# Grades Entering 2016 Class Medical Physiology
+class2016_481 <- read_excel("Grades_Raw_2.xlsx", sheet = "2016_481")
+class2016_483 <- read_excel("Grades_Raw_2.xlsx", sheet = "2016_483")
+class2016_482 <- read_excel("Grades_Raw_2.xlsx", sheet = "2016_482")
+class2016_484 <- read_excel("Grades_Raw_2.xlsx", sheet = "2016_484")
+class2016_NBME <- read_excel("Grades_Raw_2.xlsx", sheet = "2016_NBME")
+class2016_Hob <- read_excel("Grades_Raw_2.xlsx", sheet = "2016_Hob")
+```
+
+The data were pooled from the google grade sheet for each class. Hobson data was also included. 
+
+## Tidying
+
+```{r Combine Tibbles}
+class2011 <- class2011_481 %>% 
+  full_join(class2011_482, by = c("Last.name", "First.name")) %>% 
+  full_join(class2011_483, by = c("Last.name", "First.name")) %>%
+  full_join(class2011_484, by = c("Last.name", "First.name")) %>%
+  mutate(Year = 2011) # Keep track of Entry Year
+
+class2012 <- class2012_481 %>% 
+  full_join(class2012_482, by = c("Last.name", "First.name")) %>% 
+  full_join(class2012_483, by = c("Last.name", "First.name")) %>%
+  full_join(class2012_484, by = c("Last.name", "First.name")) %>%
+  full_join(class2012_NBME, by = c("Last.name", "First.name")) %>%
+  mutate(Year = 2012) # Keep track of Entry year
+
+class2013 <- class2013_481 %>% 
+  full_join(class2013_482, by = c("Last.name", "First.name")) %>% 
+  full_join(class2013_483, by = c("Last.name", "First.name")) %>%
+  full_join(class2013_484, by = c("Last.name", "First.name")) %>%
+  full_join(class2013_NBME, by = c("Last.name", "First.name")) %>%
+  mutate(Year = 2013) # Keep track of Entry year
+
+class2014 <- class2014_Hob %>% 
+  full_join(class2014_NBME, by = c("Last.name", "First.name")) %>% 
+  mutate(Year = 2014) # Keep track of Entry year
+
+class2015 <- class2015_481 %>% 
+  full_join(class2015_482, by = c("Last.name", "First.name")) %>% 
+  full_join(class2015_483, by = c("Last.name", "First.name")) %>%
+  full_join(class2015_484, by = c("Last.name", "First.name")) %>%
+  full_join(class2015_NBME, by = c("Last.name", "First.name")) %>%
+  full_join(class2015_Hob, by = c("Last.name", "First.name")) %>%
+  mutate(Year = 2015) # Keep track of Entry year
+
+class2016 <- class2016_481 %>% 
+  full_join(class2016_482, by = c("Last.name", "First.name")) %>% 
+  full_join(class2016_483, by = c("Last.name", "First.name")) %>% 
+  full_join(class2016_484, by = c("Last.name", "First.name")) %>% 
+  full_join(class2016_NBME, by = c("Last.name", "First.name")) %>% 
+  full_join(class2016_Hob, by = c("Last.name", "First.name")) %>% 
+  mutate(Year = 2016) # Keep track of Entry year
+
+demographics <- bind_rows(class2011, class2012, class2013, 
+                          class2014, class2015, class2016)
+
+dems <- demographics %>% 
+  mutate(id = 1:nrow(demographics),
+         NBME.sqrt = NBME.Percentile^0.5,
+         Pass = ifelse(NBME.Percentile >= 3, 1, 0),
+         Pass.f = factor(Pass, levels = c(1,0), labels = c("Pass", "Fail"))) %>% 
+  filter(Year != 2011) %>% 
+  select(id, Last.name, First.name, Year, Phys.B1.E1, 
+         Phys.B2.E2, Phys.B3.E3, Phys.B4.E4, Phys.B5.E5, Phys.B6.E6, Phys.B7.E7, 
+         Phys.B8.E8, Trans.B1.E1, Trans.B2.E2, Trans.B3.E3, Trans.B4.E4, 
+         Trans.B5.E5, Trans.B6.E6, Trans.B7.E7, Trans.B8.E8, NBME.Percentile, 
+         NBME.Prac.1, NBME.Prac.2, NBME.Prac.Neuro, Pass, Pass.f, NBME.sqrt)
+```
+
+The grades from each semester (481, 482, 483, and 484) were joined using the `full_join` command to create a separate tibble for each class. Because student ID's were not included, the first and last names were used to link the grades for each student. These tibbles were then merged together to include all of the years in the final tidy dataset. The data from 2011 will not be included in this study as the Translational class differed from that of the later years. 
+
+```{r}
+# Select the variables for a complete case analysis
+dems.complete <- dems %>%
+  select(id, Last.name, First.name, Year, Phys.B1.E1, 
+         Phys.B2.E2, Phys.B3.E3, Phys.B4.E4, Phys.B5.E5, Phys.B6.E6, Phys.B7.E7, 
+         Phys.B8.E8, Trans.B1.E1, Trans.B2.E2, Trans.B3.E3, Trans.B4.E4, 
+         Trans.B5.E5, Trans.B6.E6, Trans.B7.E7, Trans.B8.E8, NBME.Percentile, 
+         Pass, Pass.f, NBME.sqrt) %>% 
+  na.omit()
+```
+
+```{r Create the Imputed Case}
+# Remove cases without outcomes
+dems.predict <- dems %>%
+  filter(!is.na(NBME.Percentile))
+
+# Impute
+dems.imp <- as.data.frame(mice::complete(mice(dems.predict, 
+                                m = 1, maxit = 10, seed = 271828, print = F),1))
+```
+
+There were two tibbles used in this project:
+
+  + The complete case with `r nrow(dems.complete)` rows and `r ncol(dems.complete)` columns (variables)
+
+```{r Glimpse Complete}
+glimpse(dems.complete)
+```
+
+  + The imputed case with `r nrow(dems.predict)` rows and `r ncol(dems.predict)` columns (variables)
+
+```{r Glimpse Imputed}
+glimpse(dems.predict)
+```
+
+## Code Book
+
+```{r}
+codebook <- data_frame(
+    Variable = c("id", "Year", "Phys.B1.E1", 
+                 "Phys.B2.E2", "Phys.B3.E3", "Phys.B4.E4", "Phys.B5.E5", 
+                 "Phys.B6.E6", "Phys.B7.E7", "Phys.B8.E8", "Trans.B1.E1", 
+                 "Trans.B2.E2", "Trans.B3.E3", "Trans.B4.E4", "Trans.B5.E5", 
+                 "Trans.B6.E6", "Trans.B7.E7", "Trans.B8.E8", "NBME.Percentile"),
+    Type = c("Record Id", "Categorical", "Quant", 
+                 "Quant", "Quant", "Quant", "Quant", 
+                 "Quant", "Quant", "Quant", "Quant", 
+                 "Quant", "Quant", "Quant", "Quant", 
+                 "Quant", "Quant", "Quant", "Quant Outcome"),
+    Notes = c("Linking Number for each student", "Year of program entry (2011 - 2016)",
+              "Med Phys Block 1 Exam (47 - 103)", "Med Phys Block 2 Exam (52 - 103)",
+              "Med Phys Block 3 Exam (17 - 119)", "Med Phys Block 4 Exam (44 - 100)",
+              "Med Phys Block 5 Exam (55 - 104)", "Med Phys Block 6 Exam (53 - 114)", 
+              "Med Phys Block 7 Exam (49 - 105)", "Med Phys Block 8 Exam (69 - 100)", 
+              "Trans Phys Block 1 Exam (45 - 117)", "Trans Phys Block 2 Exam (42 - 112)",
+              "Trans Phys Block 3 Exam (12 - 115)", "Trans Phys Block 4 Exam (6 - 107)",
+              "Trans Phys Block 5 Exam (39 - 102)", "Trans Phys Block 6 Exam (33 - 106)",
+              "Trans Phys Block 7 Exam (36 - 101)", "Trans Phys Block 8 Exam (56 - 105)",
+              "NBME Percentile (0 - 99)")
+    )
+
+pander(codebook, split.cells = c(10, 10, 53), caption = "Codebook")
+```
+
+
+## Table 1
+
+```{r Table 1 Complete Cases, eval=T}
+# Make a Table 1 for the Complete Cases
+vars <- c("Phys.B1.E1", "Phys.B2.E2", "Phys.B3.E3",
+          "Phys.B4.E4", "Phys.B5.E5", "Phys.B6.E6", 
+          "Phys.B7.E7", "Phys.B8.E8", 
+          "Trans.B1.E1", "Trans.B2.E2", 
+          "Trans.B3.E3", "Trans.B4.E4", "Trans.B5.E5", 
+          "Trans.B6.E6", "Trans.B7.E7", "Trans.B8.E8", 
+          "NBME.Percentile")
+
+CreateTableOne(vars = vars,
+               strata = "Year", data = dems.complete)
+```
+
+The summary above includes the years `2012`, `2013`, `2015`, `2016`. The year 2014 was omitted because I could not locate the individual block exam scores. This is a shame as we did have NBME data for that year. Of note, the average NBME scores appear to be decreasing by year, with the exception of the 2013 cohort (44.39). 
+
+```{r Correlation Matrix Complete}
+# Make a Correlation Matrix with Complete Cases for Med Phys
+
+pairs(~ NBME.sqrt + Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + 
+         Phys.B4.E4 + Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Phys.B8.E8,
+  data = dems.complete,
+  main = "Correlation Matrix - Complete Cases (n = 394)",
+  upper.panel = panel.smooth,
+  diag.panel = panel.hist,
+  lower.panel = panel.cor)
+```
+
+The correlation matrix comparing the square root of the NBME percentile with each of the medical physiology block exam scores shows moderately strong correlations between the outcome and the block exam scores. Of note, Block 8 had the weakest correlation with outcome. 
+
+```{r Correlation Matrix Imputed}
+# Make a Correlation Matrix with Complete Cases for Trans Phys
+pairs(~ NBME.sqrt + Trans.B1.E1 + Trans.B2.E2 + Trans.B3.E3 + 
+         Trans.B4.E4 + Trans.B5.E5 + Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8,
+  data = dems.complete,
+  main = "Correlation Matrix - Complete Cases (n = 394)",
+  upper.panel = panel.smooth,
+  diag.panel = panel.hist,
+  lower.panel = panel.cor)
+```
+
+```{r}
+# Make a Correlation Matrix with Complete Cases for NBME Practice Exams
+# Only the 2016 year because the practice exams changed this year
+
+dems.2016 <- dems %>% 
+  na.omit() %>% 
+  filter(Year == 2016)
+
+pairs(~ NBME.Percentile + NBME.Prac.1 + NBME.Prac.2 + NBME.Prac.Neuro,
+  data = dems.2016,
+  main = "Correlation Matrix - Complete Cases 2016 Class (n = 75)",
+  upper.panel = panel.smooth,
+  diag.panel = panel.hist,
+  lower.panel = panel.cor)
+```
+
+I ran a correlation matrix here with the 2016 data, including only the students who completed all 3 practice NBME exams. Out of 139 students, only 75 (54%) completed all three. There was a weak positive correlation associated with each of the scores on the untransformed outcome. Note that this only includes about half of the data. 
+
+## Transform
+
+```{r, message=FALSE}
+## Consider Potential Transformations
+p1 <- ggplot(dems.complete, aes(x = NBME.Percentile)) +
+  geom_histogram(fill = "#1385F0", col = "white") +
+  labs(title = "Untransformed", x = "NBME Percentile") +
+  theme_classic()
+
+p2 <- ggplot(dems.complete, aes(x = (NBME.Percentile)^0.5)) +
+  geom_histogram(fill = "hotpink", col = "white") +
+  labs(title = "sqrt(Outcome)", x = "NBME Percentile") +
+  theme_classic()
+
+p3 <- ggplot(dems.complete, aes(x = (NBME.Percentile)^2)) +
+  geom_histogram(fill = "#1385F0", col = "white") +
+  labs(title = "(Outcome)^2", x = "NBME Percentile") +
+  theme_classic()
+
+p4 <- ggplot(dems.complete, aes(x = log(NBME.Percentile + 1))) +
+  geom_histogram(fill = "#1385F0", col = "white") +
+  labs(title = "log(Outcome + 1)", x = "NBME Percentile") +
+  theme_classic()
+
+grid.arrange(p2, p1, p3, p4, ncol = 2)
+
+# I think the square root transformaiton looks best here
+# Create a new variable with the sqrt of the outcome
+```
+
+Plots of potential transformations of the NBME Percentile are included here. We are hoping for a somewhat normal distribution (or at least symmetrical) in the outcome. So far the square root of the outcome looks the best here. Once the regression models have been created, residual plots will be considered to select the best transformation. 
+
+```{r, eval=F, include=F}
+# Boxcox/car library
+boxCox(lm(NBME.Percentile + 1 ~ Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + 
+         Phys.B4.E4 + Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Phys.B8.E8 + 
+           Trans.B1.E1 + Trans.B2.E2 + Trans.B3.E3 + 
+         Trans.B4.E4 + Trans.B5.E5 + Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8,
+         data = dems.complete))
+# This also suggests a less than 1 transformation
+```
+Running a box cox also suggests the use of a transformation to a positive power less than 1. 
+
+# Analyses{.tabset}
+
+Create a regression model to predict the percentile on the NBME Physiology exam based on the following variables:
+
+  + `Phys.B1.E1`: Medical Physiology Exam Block 1 - Basic Principles
+  + `Phys.B2.E2`: Medical Physiology Exam Block 2 - Neurophysiology
+  + `Phys.B3.E3`: Medical Physiology Exam Block 3 - Cardiovascular Physiology
+  + `Phys.B4.E4`: Medical Physiology Exam Block 4 - Renal Physiology
+  + `Phys.B5.E5`: Medical Physiology Exam Block 5 - Respiratory Physiology
+  + `Phys.B6.E6`: Medical Physiology Exam Block 6 - Gastrointestinal Physiology
+  + `Phys.B7.E7`: Medical Physiology Exam Block 7 - Endocrine Physiology
+  + `Phys.B8.E8`: Medical Physiology Exam Block 8 - Physiology of Everyday Life
+  + `Trans.B1.E1`: Translational Physiology Exam Block 1 - Basic Principles
+  + `Trans.B2.E2`: Translational Physiology Exam Block 2 - Neurophysiology
+  + `Trans.B3.E3`: Translational Physiology Exam Block 3 - Cardiovascular Physiology
+  + `Trans.B4.E4`: Translational Physiology Exam Block 4 - Renal Physiology
+  + `Trans.B5.E5`: Translational Physiology Exam Block 5 - Respiratory Physiology
+  + `Trans.B6.E6`: Translational Physiology Exam Block 6 - Gastrointestinal Physiology
+  + `Trans.B7.E7`: Translational Physiology Exam Block 7 - Endocrine Physiology
+  + `Trans.B8.E8`: Translational Physiology Exam Block 8 - Physiology of Everyday Life
+```{r, eval=FALSE, include=FALSE}
+# partition the data into Training and Test Samples
+set.seed(2718281)
+# use 75% of the data in the training sample. 738 observations.
+dems.complete.training <- dems.complete %>% sample_frac(0.75) 
+dems.complete.test <- anti_join(dems.complete, dems.complete.training, 
+                                  by = "id")
+```
+
+## KS
+
+Include all of the predictors - all 8 Medical Physiology block exam scores and all 8 Translational Physiology block exam scores - to predict the student's NBME Percentile. Include only the students for which we have complete data. 
+
+```{r Kitchen Sink Complete, warning=FALSE}
+# Use all the predictors
+dd <- datadist(dems.complete)
+options(datadist = "dd")
+
+ols.ks <- ols(NBME.sqrt ~ Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + 
+         Phys.B4.E4 + Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Phys.B8.E8 + 
+           Trans.B1.E1 + Trans.B2.E2 + Trans.B3.E3 + Trans.B4.E4 + 
+           Trans.B5.E5 + Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8, 
+         data = dems.complete,
+         x = TRUE, y = TRUE)
+ols.ks
+rms::vif(ols.ks)
+```
+
+The variance inflation factors are all below 5. Surprisingly, there is no indication of collinearity issues between predictors. The model accounts for `r round(ols.ks$stats[c("R2")],3)` of variability in the predictions. In this model, Medical Physiology exams from blocks 1, 3, 6 and the Translational Physiology exam from block 6 were associated with significant results in the outcome. 
+
+```{r, echo=T}
+# plot the anova values
+plot(anova(ols.ks))
+```
+
+The anova plot suggests that Blocks 1 (Cell), 3 (Cardio), and 6 (GI) from Medical Physiology and Block 6 from Translational Physiology were most important in the model containing all block exam scores as predictors. Translational Physiology Exams from Block 5 (Respiratory) and 8 (Everyday Life) were also significant at the 10 percent level. 
+
+### Effects
+
+```{r, message=FALSE}
+plot(summary(ols.ks), main = "")
+```
+
+The plot above shows the effect sizes from each of the exams. Medical Physiology blocks 1 and 3 accounted for the largest effect sizes in outcome.
+
+### Nomogram
+```{r, message=FALSE, fig.height=9, fig.width=6}
+plot(nomogram(ols.ks))
+```
+
+```{r, message=FALSE}
+plot(calibrate(ols.ks))
+```
+
+This Calibration plot is quite good. However, the model does seem to underpredict for scores below about the 15th percentile.
+
+### Plot Predictions: Kitchen Sink
+
+```{r, message=FALSE, include=T}
+plot.ks.nbme3 <- ggplot(Predict(ols.ks, Phys.B3.E3 = 60:110)) +
+  geom_point(aes(x = Phys.B3.E3, y = NBME.sqrt), data = dems.complete) +
+    theme_bw() +
+  labs(x = "Cardiovascular Physiology Exam Score",
+         y = "Sqrt(NBME Percentile)",
+         #title = "Model 1 - Kitchen Sink Predictions",
+         subtitle = "Holding all other predictors at their medians")
+
+plot.ks.nbme1 <- ggplot(Predict(ols.ks, Phys.B1.E1 = 40:105)) +
+  geom_point(aes(x = Phys.B1.E1, y = NBME.sqrt), data = dems.complete) +
+    theme_bw() +
+  labs(x = "Cellular Physiology Exam Score",
+         y = "Sqrt(NBME Percentile)",
+         title = "Model 1 - Kitchen Sink Predictions",
+         subtitle = "Holding all other predictors at their medians")
+
+grid.arrange(plot.ks.nbme1, plot.ks.nbme3, nrow = 2)
+```
+
+### Validate
+
+```{r, eval=T, include=T}
+set.seed(314); 
+ols.ks.val <- validate(ols.ks)
+ols.ks.val
+
+ols.ks.g <- glance(ols.ks)
+```
+
+Validate the kitchen sink model using simulated data via bootstrapping. Optimism in the R-square is only a few points, suggesting that the model predicts reasonably with new data. 
+
+```{r, include=T}
+# Check the residual Plots
+lm.ks <- lm(NBME.sqrt ~ Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + 
+         Phys.B4.E4 + Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Phys.B8.E8 + 
+           Trans.B1.E1 + Trans.B2.E2 + Trans.B3.E3 + Trans.B4.E4 + 
+           Trans.B5.E5 + Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8, 
+         data = dems.complete)
+
+par(mfrow=c(2,2))
+plot(lm.ks, which  = c(1,2,3,5))
+par(mfrow=c(2,2))
+```
+
+The Residuals vs Fitted in conjuction with the Scale-Location plot show no issues in the assumption of homoscedasticity (we can assume that the residuals follow the constance variance assumption). The normal Q-Q plot shows no issues with normality, however note the outliers 9, 110, and 343; however as the sample inclues 395 observations we can reasonably expect around 10 observations outside of the second quantile. The residuals vs Leverage plot shows a few highly leveraged points (points where the leverage is 3x the mean) including point 337. A future sensitivity analysis may involve removing observation 337 to see if this substantially changes the model. 
+
+## Best Subsets
+
+Use the best Subsets technique to identify which predictors should be included in the model. 
+
+```{r}
+# Save the variables for Best Subsets
+preds <- with(dems.complete, cbind(Phys.B1.E1, Phys.B2.E2, Phys.B3.E3, 
+         Phys.B4.E4, Phys.B5.E5, Phys.B6.E6, Phys.B7.E7, Phys.B8.E8, 
+           Trans.B1.E1, Trans.B2.E2, Trans.B3.E3, Trans.B4.E4, 
+           Trans.B5.E5, Trans.B6.E6, Trans.B7.E7, Trans.B8.E8))
+
+x1 <- regsubsets(preds, dems.complete$NBME.sqrt, nvmax=16) # 16 possible variables
+rs <- summary(x1) # summary of where the variables are
+
+
+temp <-  data.frame(p = 2:17, adjr2 = round(rs$adjr2, 3)) # Adj R^2
+temp$bic <- round(rs$bic, 2) # BIC
+
+# Calculate Corrected AIC
+n = nrow(dems.complete) # save number of observations
+rs$aic.corr <- n*log(rs$rss / n) + 2*(2:17) +
+               (2 * (2:17) * ((2:17) + 1) / (n - (2:17) - 1))
+temp$aic.corr <- round(rs$aic.corr, 2)
+
+# Mallow's Cp
+temp$Cp <- round(rs$cp, 1)
+temp$difference <- round(rs$cp, 1) - 2:17
+
+pander(temp)
+```
+
+Med Phys Blocks 1, 3, 5, and 6 appear to be the most important predictors. Trans Phys Block 6 was also important. The goal here is to minimize the corrected AIC, BIC, and difference between mallow's Cp and the number of predictors in the model.  
+
+```{r, include=FALSE, eval=FALSE}
+# 4 Summary Plots
+par(mfrow=c(2,2))
+
+# Adjusted R-squared Plot
+m2 <- max(rs$adjr2)
+m1 <- which.max(rs$adjr2)
+plot(rs$adjr2 ~ I(2:17), ylab="Adjusted R-squared", 
+     xlab="# of Fitted Coefficients, with Intercept",
+     main="Adjusted R-Squared")
+lines(spline(rs$adjr2 ~ I(2:17)))
+arrows(m1+1, m2-0.02, m1+1, m2)
+#text(m1+1, m2-0.03, paste("max =", format(m2, digits=3)))
+#text(m1+1, m2-0.045, paste("with", format(m1+1, digits=1), 
+                        #"coeffs."), pos=3)
+
+# Cp Plot
+plot(rs$cp ~ I(2:17), 
+     ylab="Cp Statistic", 
+     xlab="p = # of Fitted Coefficients", 
+     pch=16, main="Cp")
+abline(0,1)
+
+# Next calculate bias-corrected AIC
+# recall n = 64, and we have 10 models
+# so that's 2-11 coefficients to fit
+
+#rs$aic.corr <- 64*log(rs$rss / 64) + 2*(2:11) +
+               #(2 * (2:11) * ((2:11)+1) / (64 - (2:11) - 1))
+
+# Bias-Corrected AIC plot with arrow included
+# to indicate minimum AIC-corrected
+m2 <- min(rs$aic.corr)
+m1 <- which.min(rs$aic.corr)
+plot(rs$aic.corr ~ I(2:17), ylab="Bias-Corrected AIC", 
+     xlab="# of Fitted Coefficients", pch=16, cex=1.5, 
+     col="tomato", main="Bias-Corrected AIC")
+arrows(m1+1, m2+3, m1+1, m2+1)
+
+# plot BIC with indicating arrow for minimizer
+m2 <- min(rs$bic)
+m1 <- which.min(rs$bic)
+plot(rs$bic ~ I(2:17), ylab="BIC", xlab="# of Fitted Coefficients", 
+     pch=16, cex=1.5, col="slateblue", main="BIC")
+arrows(m1+1, m2+4, m1+1, m2+1)
+```
+
+```{r}
+# Decide that we want to only use 6 predictors
+# Pick the 2 best models with 6 predictors
+x2 <- regsubsets(preds, dems.complete$NBME.sqrt, 
+                 nbest=2, nvmax=6) # use 6 predictors + Intercept
+rs2 <- summary(x2)
+rs2
+```
+
+
+Applying the somewhat arbitraty decision that we only want to include 6 predictors + intercept in our model suggests `Phys.B1.E1`, `Phys.B3.E3`, `Phys.B5.E5`, `Phys.B6.E6`, `Trans.B6.E6` and either `Trans.B4.E4` or `Trans.B8.E8` should be included. 
+
+```{r, message=F}
+dd <- datadist(dems.complete)
+options(datadist = "dd")
+
+ols.mod.6 <- ols(NBME.sqrt ~ Phys.B3.E3 + Phys.B1.E1 + Phys.B5.E5 +
+         Phys.B6.E6 + Trans.B4.E4 + Trans.B5.E5, data = dems.complete,
+         x = T, y = T)
+ols.mod.6
+```
+
+This model accounts for `r round(ols.mod.6$stats["R2"], 3)`. All of the predictors, with the exception of the Block 5 translational exam were significant to the 95% level.  
+
+### Effects
+
+```{r}
+plot(summary(ols.mod.6))
+```
+
+### Nomogram
+
+```{r}
+plot(nomogram(ols.mod.6))
+```
+
+```{r}
+plot(calibrate(ols.mod.6))
+```
+
+
+### Validate
+
+```{r}
+set.seed(314); 
+ols.mod.6.val <- validate(ols.mod.6)
+ols.mod.6.g <- glance(ols.mod.6)
+```
+
+
+```{r, include=T}
+
+lm.mod.6 <- lm(NBME.sqrt ~ Phys.B3.E3 + Phys.B1.E1 + Phys.B5.E5 +
+         Phys.B6.E6 + Trans.B4.E4 + Trans.B5.E5, data = dems.complete)
+
+par(mfrow=c(2,2))
+plot(lm.mod.6, which  = c(1,2,3,5))
+par(mfrow=c(2,2))
+```
+
+As in the kitchen sink model, there appear to be no issues with the assumption of constant variance. However there does appear to be one highly leveraged point (337). 
+
+## Lasso
+
+```{r}
+# Save the variables for lasso
+preds <- with(dems.complete, cbind(Phys.B1.E1, Phys.B2.E2, Phys.B3.E3, 
+         Phys.B4.E4, Phys.B5.E5, Phys.B6.E6, Phys.B7.E7, Phys.B8.E8, 
+           Trans.B1.E1, Trans.B2.E2, Trans.B3.E3, Trans.B4.E4, 
+           Trans.B5.E5, Trans.B6.E6, Trans.B7.E7, Trans.B8.E8))
+
+lasso.ks <- lars(preds, dems.complete$NBME.sqrt, type="lasso")
+plot(lasso.ks)
+summary(lasso.ks)
+
+# 10 Fold Cross Validation
+set.seed(432432)
+lasso.cv <- cv.lars(preds, dems.complete$NBME.sqrt, K=10)
+
+## Minimize the Cross Validated MSE
+cv.frac <- lasso.cv$index[which.min(lasso.cv$cv)]
+cv.frac # Minimization occurs at around 0.84
+```
+
+```{r}
+# Get the shrunken lasso coefficients
+coef.cv <- coef(lasso.ks, s=cv.frac, mode="fraction")
+#round(coef.cv,4)
+
+# Get the non-zero coefficients
+round(coef.cv[coef.cv != 0], 4)
+#round(lm.beta(lasso.ks.nz), 4)
+```
+
+```{r}
+# Make a new model containing only the non-zero coefficients
+lasso.ks.nz <- lm(NBME.sqrt ~ Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + 
+         Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Trans.B1.E1 + 
+           Trans.B2.E2 + Trans.B3.E3 + Trans.B4.E4 + Trans.B5.E5 + 
+           Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8,
+          data = dems.complete)
+
+## lm.beta is part of the QuantPsyc library
+## Non-zero lasso Coefficients
+lasso.ks.ns <- round(lm.beta(lasso.ks.nz),4)
+
+## Obtain Confidence intervals
+lasso.coef.tidy <- tidy(lasso.ks.nz, conf.int = T)[, c("term", "estimate", "p.value", "conf.low", "conf.high")]
+pander(lasso.coef.tidy)
+```
+
+```{r, eval=FALSE, include=FALSE}
+# Obtain fitted Values from the Lasso
+fits.lasso.cv <- predict.lars(lasso.ks, preds, s=cv.frac, 
+                        type="fit", mode="fraction")
+#fits.lasso.cv$fit^2 # Recall these are square roots so we have to square them
+```
+
+### Calibrate
+
+```{r, eval=T, include=T}
+lasso.ks.ols <- ols(NBME.sqrt ~ Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + 
+         Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Trans.B1.E1 + 
+           Trans.B2.E2 + Trans.B3.E3 + Trans.B4.E4 + Trans.B5.E5 + 
+           Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8,
+          data = dems.complete, x=T, y=T)
+
+plot(calibrate(lasso.ks.ols))
+```
+
+### Validate
+
+```{r}
+set.seed(314)
+lasso.ks.ols.val <- validate(lasso.ks.ols)
+lasso.ks.ols.val
+
+lasso.ks.ols.g <- glance(lasso.ks.ols)
+```
+
+Using the Lasso technique doesn't really do anything for us here; this model is similar enough to the kitchen sink.
+
+## Interaction
+
+```{r, include=T}
+dd <- datadist(dems.complete)
+options(datadist = "dd")
+
+ols.mod.int <- ols(NBME.sqrt ~ Phys.B3.E3*Phys.B1.E1 + Phys.B5.E5 +
+         Phys.B6.E6 + Trans.B4.E4 + Trans.B5.E5, data = dems.complete,
+         x = TRUE, y = TRUE)
+ols.mod.int
+```
+
+```{r}
+plot(calibrate(ols.mod.int))
+```
+
+### Validate
+
+```{r, include=T}
+set.seed(314); 
+ols.mod.int.val <- validate(ols.mod.int)
+ols.mod.int.val
+
+ols.mod.int.g <- glance(ols.mod.int)
+```
+
+
+# Model Comparison
+
+Compare the the Kitchen Sink (ols.ks), Lasso (lasso.ks), Best Subsets with 6 predictors (ols.mod.6), and a model with an interaction term (ols.mod.int).  
+
+```{r}
+compare.table <- data_frame(
+  Model = c("Kitchen Sink", "Lasso", "Best Subsets", "Interaction"),
+  Predictors = c("16", "14", "6", "6"),
+  R2 = round(c(ols.ks$stats["R2"], lasso.ks.ols$stats["R2"], 
+          ols.mod.6$stats["R2"], ols.mod.int$stats["R2"]),3),
+  'corr R2' = round(c(ols.ks.val["R-square","index.corrected"],
+                lasso.ks.ols.val["R-square","index.corrected"],
+                ols.mod.6.val["R-square","index.corrected"],
+                ols.mod.int.val["R-square","index.corrected"]),3),
+  MSE = round(c(ols.ks.val["MSE","index.corrected"],
+                lasso.ks.ols.val["MSE","index.corrected"],
+                ols.mod.6.val["MSE","index.corrected"],
+                ols.mod.int.val["MSE","index.corrected"]),3),
+  AIC = c(round(ols.ks.g["AIC"]), round(lasso.ks.ols.g["AIC"]), 
+          round(ols.mod.6.g["AIC"]), round(ols.mod.int.g["AIC"])),
+  BIC = c(round(ols.ks.g["BIC"]), round(lasso.ks.ols.g["BIC"]), 
+          round(ols.mod.6.g["BIC"]), round(ols.mod.int.g["BIC"])),
+  g = round(c(ols.ks.val["g","index.corrected"],
+                lasso.ks.ols.val["g","index.corrected"],
+                ols.mod.6.val["g","index.corrected"],
+                ols.mod.int.val["g","index.corrected"]),3)
+)
+
+pander(compare.table, 
+       caption = "NBME Model Comparisons")
+```
+
+**Kitchen Sink**: sqrt(NBME) = Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + Phys.B4.E4 + Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Phys.B8.E8 + Trans.B1.E1 + Trans.B2.E2 + Trans.B3.E3 + Trans.B4.E4 + Trans.B5.E5 + Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8
+    
+**Lasso**: sqrt(NBME) = Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Trans.B1.E1 + Trans.B2.E2 + Trans.B3.E3 + Trans.B4.E4 + Trans.B5.E5 + Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8
+
+**Best Subsets**: sqrt(NBME) =Phys.B3.E3 + Phys.B1.E1 + Phys.B5.E5 + Phys.B6.E6 + Trans.B4.E4 + Trans.B5.E5
+    
+**Interaction**: sqrt(NBME) = Phys.B3.E3 * Phys.B1.E1 + Phys.B5.E5 + Phys.B6.E6 + Trans.B4.E4 + Trans.B5.E5
+
+The Lasso model had both the best corrected R2 (what would be expected if predicting in new data), the lowest mean square error, and AIC. However, the differences were quite small. Because the difference in BIC values was greater than 20 points, I prefer the interaction model. 
+
+
+```{r, eval=FALSE, include=FALSE}
+# requires ROCR and ggplot libraries
+prob <- predict(lrm.model.1, type="fitted")
+pred <- prediction(prob, Leo$Accepted)
+perf <- performance(pred, measure = "tpr", x.measure = "fpr")
+auc <- performance(pred, measure="auc")
+
+# the rest of this code is a little strange
+auc <- round(auc@y.values[[1]],3)
+roc.data <- data.frame(fpr=unlist(perf@x.values),
+                       tpr=unlist(perf@y.values),
+                       model="GLM")
+ggplot(roc.data, aes(x=fpr, ymin=0, ymax=tpr)) +
+    geom_ribbon(alpha=0.2) +
+    geom_line(aes(y=tpr)) +
+  geom_line(aes(y = fpr)) +
+    ggtitle(paste0("ROC Curve for Kitchen Sink Complete Case w/ AUC=", auc)) +
+  theme_bw()
+```
+
+# Conclusions
+
+  + Both Medical Physiology and Translational Physiology block exam scores carry some predictive power in determining the student's percentile on the National Board.
+  + Via the model using best subsets, Medical Physiology Blocks 1, 3, 5 and 6 and Translational Physiology Blocks 4 and 5 seem to be most important in predicting the score
+  
+*Opportunities for further investigation*:
+
+  + Observation 337 was highly leveraged; removing this point from the dataset may very well change which block exams are included in the model. However, this is unlikely to drastically increase the $R^2$ value. The predictive power of the model is unlikely to change, however we may find that other block exam scores were more important.
+  + I would have liked to have included more demographic variables in the model, such as sex, age, race, etc. 
+  + I would have liked to have block exam scores for the 2014 cohort.
+  + It would be great if we had data on the Kaplan Q-Bank completion. I would have liked to incorporate that as well.
+    
+*I learned*:
+
+  + Block 8 holds very little importance in terms of the NBME score
+  + Even though block exam scores, undergraduate GPA, and MCAT scores seem to be quite steady with each new class, the NBME percentiles have been trending down.
+
+
+```{r, eval=T}
+# Obtain R version/Platform/OS
+sessionInfo()
+```
+
