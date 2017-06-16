@@ -3,6 +3,7 @@ title: "Predicting NBME Percentiles"
 author: "Trish Campos"
 date: '`r Sys.Date()`'
 output:
+  github_document:
   rmdformats::readthedown:
     highlight: kate
     number_sections: yes
@@ -214,7 +215,8 @@ codebook <- data_frame(
               "NBME Percentile (0 - 99)")
     )
 
-pander(codebook, split.cells = c(10, 10, 53), caption = "Codebook")
+#pander(codebook, split.cells = c(10, 10, 53), caption = "Codebook")
+codebook
 ```
 
 
@@ -724,8 +726,9 @@ compare.table <- data_frame(
                 ols.mod.int.val["g","index.corrected"]),3)
 )
 
-pander(compare.table, 
-       caption = "NBME Model Comparisons")
+#pander(compare.table, 
+       #caption = "NBME Model Comparisons")
+compare.table
 ```
 
 **Kitchen Sink**: sqrt(NBME) = Phys.B1.E1 + Phys.B2.E2 + Phys.B3.E3 + Phys.B4.E4 + Phys.B5.E5 + Phys.B6.E6 + Phys.B7.E7 + Phys.B8.E8 + Trans.B1.E1 + Trans.B2.E2 + Trans.B3.E3 + Trans.B4.E4 + Trans.B5.E5 + Trans.B6.E6 + Trans.B7.E7 + Trans.B8.E8
